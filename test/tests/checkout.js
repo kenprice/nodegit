@@ -1,8 +1,14 @@
 var assert = require("assert");
 var path = require("path");
 var Promise = require("nodegit-promise");
-var fse = require("fs-extra");
+var promisify = require("promisify-node");
+var fse = promisify("fs-extra");
 var local = path.join.bind(path, __dirname);
+
+// Have to wrap exec, since it has a weird callback signature.
+var exec = promisify(function(command, opts, callback) {
+  return require("child_process").exec(command, opts, callback);
+});
 
 describe("Checkout", function() {
   var NodeGit = require("../../");
@@ -23,6 +29,38 @@ describe("Checkout", function() {
       .then(function(repo) {
         test.repository = repo;
       });
+  });
+
+  it.only("lots of files yo", function() {
+    var bigRepoPath = local("../repos/bigrepo");
+    var url = "https://github.com/kenprice/stress-test-3k";
+    var startTime;
+    this.timeout(30000);
+
+    return exec("git clone " + url + " " + bigRepoPath)
+    .then(function() {
+      return Repository.open(bigRepoPath);
+    })
+    .then(function(repo) {
+      for (var i = 0; i < 3000; i++) {
+        fse.outputFileSync(bigRepoPath + "/test" + i, "Hello");
+      }
+
+      return repo;
+    })
+    .then(function(repo) {
+      console.log("Starting...");
+      startTime = new Date();
+      var opts = {
+        checkoutStrategy: NodeGit.Checkout.STRATEGY.FORCE
+      };
+      return Checkout.head(repo, opts);
+    })
+    .then(function(blob) {
+      console.log("CHECKOUTDONE[" + (new Date() - startTime)/1000 + "]");
+      var fileContent = fse.readFileSync(bigRepoPath + "/test0", "utf8");
+      assert.ok(~fileContent.indexOf("Test"));
+    });
   });
 
   it("can checkout the head", function() {
